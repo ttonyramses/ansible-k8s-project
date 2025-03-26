@@ -1,0 +1,45 @@
+Vagrant.configure("2") do |config|
+  nodes = [
+    { name: "master1", ip: "192.168.56.11", ram: 4096, cpu: 2, disk: 10 },
+    { name: "master2", ip: "192.168.56.12", ram: 4096, cpu: 2, disk: 10 },
+    { name: "node1", ip: "192.168.56.13", ram: 3072, cpu: 2, disk: 10, disk2: 50 },
+    { name: "node2", ip: "192.168.56.14", ram: 3072, cpu: 2, disk: 10, disk2: 50 },
+    { name: "node3", ip: "192.168.56.15", ram: 3072, cpu: 2, disk: 10, disk2: 50 }
+  ]
+
+  nodes.each do |node|
+    config.vm.define node[:name] do |machine|
+      machine.vm.box = "ubuntu/jammy64"
+      machine.vm.boot_timeout = 400
+      machine.vm.hostname = node[:name]
+      machine.vm.network "private_network", ip: node[:ip]
+
+      machine.vm.provider "virtualbox" do |vb|
+        vb.memory = node[:ram]
+        vb.cpus = node[:cpu]
+        
+        
+        # S'assurer que le répertoire HardDisk existe
+        FileUtils.mkdir_p('HardDisk') unless File.directory?('HardDisk')
+        
+        # Ajouter un disque secondaire pour node1, node2 et node3
+        if node[:disk2] && ["node1", "node2", "node3"].include?(node[:name])
+          disk2_path = "HardDisk/#{node[:name]}_disk2.vdi"
+          
+          # Créer le disque s'il n'existe pas
+          unless File.exist?(disk2_path)
+            vb.customize ["createhd", "--filename", disk2_path, "--variant", "Standard", "--size", node[:disk2] * 1024]
+          end
+          
+          # Attacher le disque secondaire
+          vb.customize ["storageattach", :id, "--storagectl", "SCSI", "--port", "2", "--device", "0", "--type", "hdd", "--medium", disk2_path]
+        end
+      end
+
+      # Mise à jour du fichier /etc/hosts
+      nodes.each do |n|
+        machine.vm.provision "shell", inline: "echo '#{n[:ip]} #{n[:name]}' | sudo tee -a /etc/hosts"
+      end
+     end
+  end
+end

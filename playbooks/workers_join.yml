@@ -1,0 +1,12 @@
+---
+- name: Ajout des workers au cluster
+  hosts: workers
+  become: true
+  tasks:
+    - name: Jointure du cluster en tant que worker
+      command: "{{ hostvars['localhost']['k8s_join_command'] }}"
+      register: join_result
+      failed_when: join_result.rc != 0 and "already exists" not in join_result.stderr
+      changed_when: join_result.rc == 0
+      async: 60  # 1 minutes
+      poll: 10    # Vérifier toutes les 10 secondes

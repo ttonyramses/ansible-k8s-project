@@ -1,0 +1,51 @@
+# Ansible
+*.retry
+*.pyc
+__pycache__/
+facts_cache
+ansible.log
+.ansible/
+roles/*/files/*.tar.gz
+roles/*/files/*.zip
+roles/*/files/*.rpm
+inventory/hosts.yml
+vault-password.txt
+
+# Vagrant
+vagrant/.vagrant/
+vagrant/HardDisk/
+.vagrant/
+*.log
+*.box
+
+# Environnement virtuel Python
+venv/
+.venv/
+env/
+.env/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Fichiers d'éditeurs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Clés et secrets
+*.pem
+*.key
+*.crt
+id_rsa*
+id_dsa*
+*.pub
+
+# Terraform (si utilisé avec Ansible/Vagrant)
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraformrc
+terraform.rc

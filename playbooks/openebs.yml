@@ -1,0 +1,189 @@
+---
+- name: Installation d'OpenEBS
+  hosts: primary_master
+  become: false
+  tasks:
+    - name: Vérifier si Helm est déjà installé
+      command: which helm
+      register: helm_which
+      failed_when: false
+      changed_when: false
+      check_mode: no
+
+    - name: Installation de Helm
+      shell: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        creates: /usr/local/bin/helm
+      become: true
+      register: helm_install
+      changed_when: helm_install.rc == 0
+      when: helm_which.rc != 0
+
+    - name: Vérifier si OpenEBS est déjà installé
+      shell: helm list -n {{ openebs_namespace }} | grep openebs
+      register: openebs_installed
+      failed_when: false
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Ajout des dépôts Helm
+      command: helm repo add {{ item.name }} {{ item.url }}
+      with_items:
+        - { name: 'stable', url: 'https://charts.helm.sh/stable' }
+        - { name: 'bitnami', url: 'https://charts.bitnami.com/bitnami' }
+        - { name: 'openebs', url: 'https://openebs.github.io/charts' }
+      register: helm_repo_add
+      changed_when: helm_repo_add.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      when: openebs_installed.rc != 0
+
+    - name: Mise à jour des dépôts Helm
+      command: helm repo update
+      register: helm_repo_update
+      changed_when: helm_repo_update.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      when: openebs_installed.rc != 0
+
+    - name: Installation d'OpenEBS via Helm
+      command: helm install openebs openebs/openebs --namespace {{ openebs_namespace }} --create-namespace
+      register: openebs_install
+      failed_when: openebs_install.rc != 0 and "already exists" not in openebs_install.stderr
+      changed_when: openebs_install.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      when: openebs_installed.rc != 0
+        
+    - name: Attendre les pods OpenEBS après installation
+      include_role:
+        name: wait-k8s-pods
+      vars:
+        wait_namespace: "{{ openebs_namespace }}"
+
+    - name: Vérifier si openebs-operator est déjà installées
+      shell: kubectl get clusterroles |grep openebs-maya-operator | wc -l
+      register: openebs_operator_count
+      changed_when: false
+      failed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Application de l'opérateur OpenEBS
+      command: kubectl apply -f https://openebs.github.io/charts/openebs-operator.yaml
+      register: openebs_operator
+      failed_when: false  # Ne jamais considérer cette tâche comme échouée
+      changed_when: openebs_operator.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      when: openebs_operator_count.stdout | int < 1  # si aucun pod
+
+    - name: Attendre les pods OpenEBS après installation openebs-operator
+      include_role:
+        name: wait-k8s-pods
+      vars:
+        wait_namespace: "{{ openebs_namespace }}"
+
+    - name: Vérifier si l'opérateur cStor est déjà installé
+      shell: kubectl get crd | grep 'cstor.openebs.io' | wc -l
+      register: cstor_crds_count
+      changed_when: false
+      failed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Application de l'opérateur cStor
+      command: kubectl apply -f https://raw.githubusercontent.com/openebs/charts/gh-pages/cstor-operator.yaml
+      register: cstor_operator
+      failed_when: false  # Ne jamais considérer cette tâche comme échouée
+      # failed_when: cstor_operator.rc != 0 and "already exists" not in cstor_operator.stderr
+      changed_when: cstor_operator.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      when: cstor_crds_count.stdout | int < 2  # Si moins de 2 CRDs cStor sont trouvées
+
+    - name: Attendre les pods OpenEBS après installation cstor-operator
+      include_role:
+        name: wait-k8s-pods
+      vars:
+        wait_namespace: "{{ openebs_namespace }}"
+
+    - name: Récupération des blockdevices
+      shell: kubectl get blockdevice -n openebs -o custom-columns="NAME:.metadata.name,NODENAME:.spec.nodeAttributes.nodeName,SIZE:.spec.capacity.storage" | grep -v "^NAME" | sort -k3 -nr | awk '!seen[$2]++' | sort -k2 | awk '{print $1 " " $2}'
+      register: blockdevices
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des blockdevices
+      debug:
+        var: blockdevices.stdout_lines
+
+    - name: Création du fichier de configuration du pool cStor
+      template:
+        src: cstor-pool-cluster.j2
+        dest: /home/vagrant/cstor-pool-cluster.yaml
+        mode: '0644'
+      vars:
+        blockdevice_node1: "{{ blockdevices.stdout_lines | select('match', '.*node1') | list | first | regex_replace('\\s+node1', '') }}"
+        blockdevice_node2: "{{ blockdevices.stdout_lines | select('match', '.*node2') | list | first | regex_replace('\\s+node2', '') }}"
+        blockdevice_node3: "{{ blockdevices.stdout_lines | select('match', '.*node3') | list | first | regex_replace('\\s+node3', '') }}"
+
+    - name: Application du pool cStor
+      command: kubectl apply -f /home/vagrant/cstor-pool-cluster.yaml
+      register: cstor_pool
+      failed_when: false  # Ne jamais considérer cette tâche comme échouée
+      # failed_when: cstor_pool.rc != 0 and "already exists" not in cstor_pool.stderr
+      changed_when: cstor_pool.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Vérification des pools cStor
+      command: kubectl get cspc -n {{ openebs_namespace }}
+      register: cspc_status
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Création du fichier StorageClass
+      copy:
+        dest: /home/vagrant/cstor-storage-class.yaml
+        content: |
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: cstor-storage-class
+            annotations:
+              openebs.io/cas-type: cstor
+              cas.openebs.io/config: |
+                - name: StoragePoolClaim
+                  value: "cstor-disk-pool"
+                - name: ReplicaCount
+                  value: "3"
+          provisioner: cstor.csi.openebs.io
+          allowVolumeExpansion: true
+          parameters:
+            cas-type: cstor
+            cstorPoolCluster: cstor-disk-pool
+            replicaCount: "3"
+        mode: '0644'
+
+    - name: Application de la StorageClass
+      command: kubectl apply -f /home/vagrant/cstor-storage-class.yaml
+      register: storage_class
+      failed_when: false  # Ne jamais considérer cette tâche comme échouée
+      # failed_when: storage_class.rc != 0 and "already exists" not in storage_class.stderr
+      changed_when: storage_class.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Vérifier l'état du CStorPoolCluster
+      command: kubectl get cspc cstor-disk-pool -n openebs -o custom-columns=HEALTHYINSTANCES:.status.healthyInstances --no-headers
+      register: cspc_status
+      retries: 50
+      delay: 10
+      until: cspc_status.stdout | int > 2
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+

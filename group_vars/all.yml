@@ -1,0 +1,27 @@
+---
+# Version de Kubernetes
+kubernetes_version: "1.30.10"
+kubernetes_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
+
+# Configuration réseau
+pod_network_cidr: "10.244.0.0/16"
+service_network_cidr: "10.96.0.0/12"
+
+# Configuration metallb
+metallb_version: "v0.14.9"
+metallb_ip_range: "192.168.56.200-192.168.56.220"
+
+# Configuration OpenEBS
+openebs_namespace: "openebs"
+openebs_chart_version: "3.9.0"
+cstor_replication_factor: 3
+
+# Configuration Kafka
+kafka_namespace: "kafka"
+kafka_chart_version: "31.5.0"
+zookeeper_chart_version: "12.4.0"
+kafka_storage_size: "20Gi"
+zookeeper_storage_size: "20Gi"

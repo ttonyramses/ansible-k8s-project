@@ -1,0 +1,40 @@
+---
+- name: Vérification de la connectivité
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Vérifier la connectivité
+      ping:
+
+- name: Installation des prérequis
+  import_playbook: prerequisites.yml
+
+- name: Installation de Kubernetes
+  import_playbook: kubernetes.yml
+
+- name: Initialisation du master principal
+  import_playbook: master_init.yml
+
+- name: Ajout des masters additionnels
+  import_playbook: masters_join.yml
+
+- name: Ajout des workers
+  import_playbook: workers_join.yml
+
+- name: Configuration du réseau Calico
+  import_playbook: network.yml
+
+- name: Installation des metrics
+  import_playbook: metrics.yml
+
+- name: Installation du load balancer
+  import_playbook: loadbalancer.yml
+
+- name: Installation d'OpenEBS
+  import_playbook: openebs.yml
+
+- name: Installation de Kafka et Zookeeper
+  import_playbook: kafka.yml
+
+- name: Tests de validation
+  import_playbook: test.yml

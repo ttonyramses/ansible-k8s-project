@@ -1,0 +1,103 @@
+---
+- name: Initialisation du master principal
+  hosts: primary_master
+  become: true
+  tasks:
+    - name: Création du fichier de configuration kubeadm
+      copy:
+        dest: /home/vagrant/kubeadm-config.yaml
+        content: |
+          apiVersion: kubeadm.k8s.io/v1beta3
+          kind: InitConfiguration
+          localAPIEndpoint:
+            advertiseAddress: 192.168.56.11  # Adresse IP de master1
+            bindPort: 6443                  # Port standard
+          nodeRegistration:
+            name: master1              # Nom d'hôte du premier nœud maître
+          ---
+          apiVersion: kubeadm.k8s.io/v1beta3
+          kind: ClusterConfiguration
+          kubernetesVersion: v{{ kubernetes_version }}  # Version de Kubernetes
+          controlPlaneEndpoint: "master1:6443"  # Point d'entrée
+          apiServer:
+            certSANs:
+              - "master1"
+              - "master2"
+              - "192.168.56.11"
+              - "192.168.56.12"
+          networking:
+            podSubnet: "{{ pod_network_cidr }}"   # Plage d'adresses IP pour les pods
+            serviceSubnet: "{{ service_network_cidr }}" # Plage d'adresses IP pour les services
+          etcd:
+            local:
+              extraArgs:
+                advertise-client-urls: "https://master1:2379"
+                listen-client-urls: "https://0.0.0.0:2379"
+        owner: vagrant
+        group: vagrant
+        mode: '0644'
+
+    - name: Initialisation du cluster avec kubeadm
+      command: sudo kubeadm init --config=/home/vagrant/kubeadm-config.yaml --upload-certs
+      register: kubeadm_init
+      changed_when: "'Your Kubernetes control-plane has initialized successfully' in kubeadm_init.stdout"
+      failed_when: kubeadm_init.rc != 0 and "already exists" not in kubeadm_init.stderr
+
+    - name: Création du répertoire .kube pour l'utilisateur
+      file:
+        path: /home/vagrant/.kube
+        state: directory
+        owner: vagrant
+        group: vagrant
+        mode: '0755'
+
+    - name: Copie du fichier de configuration admin.conf
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/vagrant/.kube/config
+        owner: vagrant
+        group: vagrant
+        remote_src: yes
+        mode: '0644'
+
+    - name: Extraction du jeton et du hash pour ajout des nœuds
+      command: kubeadm token create --print-join-command
+      register: join_command
+      changed_when: false
+      become_user: vagrant
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Extraction de la clé de certificat pour ajout des masters
+      command: kubeadm init phase upload-certs --upload-certs
+      register: cert_key
+      changed_when: false
+
+    - name: Stockage des informations pour l'ajout des nœuds
+      set_fact:
+        k8s_join_command: "{{ join_command.stdout }}"
+        k8s_cert_key: "{{ cert_key.stdout_lines[-1] }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+    - name: Affichage du jeton et de la clé
+      debug:
+        msg: 
+          - "Join command: {{ hostvars['localhost']['k8s_join_command'] }}"
+          - "Cert key: {{ hostvars['localhost']['k8s_cert_key'] }}"
+
+    - name: Vérification de l'état du cluster
+      command: kubectl cluster-info
+      register: cluster_info
+      changed_when: false
+      become_user: vagrant
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Vérification des nœuds
+      command: kubectl get nodes
+      register: nodes_status
+      changed_when: false
+      become_user: vagrant
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config

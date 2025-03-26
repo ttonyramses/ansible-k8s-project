@@ -1,0 +1,182 @@
+---
+- name: Installation des prérequis
+  hosts: all
+  become: true
+  tasks:
+    - name: Mise à jour des permissions pour éviter les erreurs de lock
+      file:
+        path: "{{ item }}"
+        mode: '0777'
+      with_items:
+        - /var/lib/apt/lists/
+        - /var/lib/dpkg/
+
+    - name: Mise à jour des paquets
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Installation des outils de base
+      apt:
+        name:
+          - net-tools
+          - curl
+          - gnupg2
+          - software-properties-common
+          - apt-transport-https
+          - ca-certificates
+          - bash-completion
+        state: present
+
+    - name: Désactivation du swap
+      shell: swapoff -a
+      register: swapoff_result
+      changed_when: swapoff_result.rc == 0
+
+    - name: Désactivation permanente du swap
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+        replace: '# \1'
+
+    - name: Chargement des modules nécessaires pour containerd
+      copy:
+        dest: /etc/modules-load.d/containerd.conf
+        content: |
+          overlay
+          br_netfilter
+        mode: '0644'
+
+    - name: Chargement des modules overlay et br_netfilter
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - overlay
+        - br_netfilter
+
+    - name: Configuration des paramètres sysctl
+      copy:
+        dest: /etc/sysctl.d/kubernetes.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+        mode: '0644'
+
+    - name: Application des paramètres sysctl
+      command: sysctl --system
+      changed_when: false
+
+    - name: Ajout de la clé GPG Docker
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Création du répertoire keyrings si inexistant
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Obtenir l'architecture du système
+      shell: dpkg --print-architecture
+      register: dpkg_arch
+      changed_when: false
+
+    - name: Ajout du dépôt Docker
+      apt_repository:
+        repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        filename: docker
+
+    - name: Installation de containerd
+      apt:
+        name: containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Création du répertoire containerd
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    - name: Vérifier si le fichier de configuration containerd existe
+      stat:
+        path: /etc/containerd/config.toml
+      register: config_file
+      ignore_errors: yes
+
+    - name: Vérifier si le fichier de configuration containerd existe
+      stat:
+        path: /etc/containerd/config.toml
+      register: config_file
+      ignore_errors: yes
+
+    - name: Vérifier si le fichier de sauvegarde existe déjà
+      stat:
+        path: /etc/containerd/config.toml.old
+      register: backup_file
+      ignore_errors: yes
+
+    - name: Renommer la configuration containerd existante si ce n'est pas encore fait
+      command: mv /etc/containerd/config.toml /etc/containerd/config.toml.old
+      when: config_file.stat.exists and not backup_file.stat.exists
+      ignore_errors: yes
+
+    - name: Génération de la configuration par défaut de containerd si il n'existe pas
+      shell: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Configuration de SystemdCgroup à true
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+
+    - name: Configuration de la version de sandbox_image
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'sandbox_image = "registry.k8s.io/pause:3.8"'
+        replace: 'sandbox_image = "registry.k8s.io/pause:3.9"'
+    
+    - name: Redémarrage et activation de containerd
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Installation de chrony pour synchronisation des horloges
+      apt:
+        name:
+          - chrony
+          - zfsutils-linux
+        state: present
+
+    - name: Activation du service chrony
+      systemd:
+        name: chrony
+        state: started
+        enabled: yes
+
+    - name: Ajout des entrées dans le fichier hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item.ip }} {{ item.name }}"
+        state: present
+      with_items:
+        - { ip: "192.168.56.11", name: "master1" }
+        - { ip: "192.168.56.12", name: "master2" }
+        - { ip: "192.168.56.13", name: "node1" }
+        - { ip: "192.168.56.14", name: "node2" }
+        - { ip: "192.168.56.15", name: "node3" }
+
+    - name: Autorisations pour le disque supplémentaire (/dev/sdc) sur les nœuds
+      file:
+        path: /dev/sdc
+        mode: '0666'
+      when: "'workers' in group_names"
+      ignore_errors: yes

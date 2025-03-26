@@ -1,0 +1,98 @@
+---
+- name: Tests de validation du cluster
+  hosts: primary_master
+  become: false
+  tasks:
+    - name: Vérification des nœuds du cluster
+      command: kubectl get nodes
+      register: nodes_status
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des nœuds
+      debug:
+        var: nodes_status.stdout_lines
+
+    - name: Vérification des pods dans tous les namespaces
+      command: kubectl get pods --all-namespaces
+      register: all_pods
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des pods
+      debug:
+        var: all_pods.stdout_lines
+
+    - name: Vérification des services
+      command: kubectl get services --all-namespaces
+      register: all_services
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des services
+      debug:
+        var: all_services.stdout_lines
+
+    - name: Vérification des PersistentVolumeClaims
+      command: kubectl get pvc --all-namespaces
+      register: all_pvcs
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des PVCs
+      debug:
+        var: all_pvcs.stdout_lines
+
+    - name: Vérification du service metallb
+      command: kubectl get services nginx-service
+      register: metallb_service
+      changed_when: false
+      ignore_errors: true
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Test du service metallb
+      command: curl -s {{ metallb_service.stdout.split()[5] }}
+      register: metallb_curl
+      changed_when: false
+      ignore_errors: true
+      when: metallb_service.rc == 0
+
+    - name: Vérification du statut de OpenEBS
+      command: kubectl get pods -n {{ openebs_namespace }}
+      register: openebs_pods
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des pods OpenEBS
+      debug:
+        var: openebs_pods.stdout_lines
+
+    - name: Vérification du statut de Kafka et Zookeeper
+      command: kubectl get pods -n {{ kafka_namespace }}
+      register: kafka_pods
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des pods Kafka et Zookeeper
+      debug:
+        var: kafka_pods.stdout_lines
+
+    - name: Vérification des metrics-server
+      command: kubectl top nodes
+      register: metrics_nodes
+      changed_when: false
+      ignore_errors: true
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage des métriques des nœuds
+      debug:
+        var: metrics_nodes.stdout_lines
+      when: metrics_nodes.rc == 0

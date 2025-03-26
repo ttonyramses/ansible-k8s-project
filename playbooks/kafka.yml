@@ -1,0 +1,213 @@
+---
+- name: Installation de Kafka et Zookeeper
+  hosts: primary_master
+  become: false
+  tasks:
+    - name: Création du fichier de configuration Zookeeper
+      copy:
+        dest: /home/vagrant/values-zookeeper.yaml
+        content: |
+          # Fichier values-zookeeper.yaml avec configuration de stockage explicite
+          replicaCount: 3
+
+          ## Persistence configuration
+          persistence:
+            enabled: true
+            ## Persistent Volume Storage Class
+            ## If defined, storageClassName: <storageClass>
+            storageClass: "cstor-storage-class"
+            accessModes:
+              - ReadWriteOnce
+            size: {{ zookeeper_storage_size }}
+            annotations: {}
+
+          ## StatefulSet controller configuration
+          updateStrategy: 
+            type: RollingUpdate
+          ## Pod management policy
+          ## ref: https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#pod-management-policies
+          podManagementPolicy: Parallel
+
+          ## Zookeeper configuration
+          autopurge:
+            purgeInterval: 1
+            snapRetainCount: 3
+
+          resources:
+            limits:
+              cpu: 1
+              memory: 1Gi
+            requests:
+              cpu: 500m
+              memory: 512Mi
+        mode: '0644'
+
+    - name: Création du fichier de configuration Kafka
+      copy:
+        dest: /home/vagrant/values-kafka.yaml
+        content: |
+          ## https://github.com/bitnami/charts/blob/main/bitnami/kafka/README.md
+          ## Configuration des brokers Kafka
+          broker:
+            replicaCount: 3  # Nombre de répliques de brokers explicitement défini
+            persistence:
+              enabled: true
+              storageClass: "cstor-storage-class"
+              accessModes:
+                - ReadWriteOnce
+              size: {{ kafka_storage_size }}
+
+              ## Ressources pour les pods Kafka
+            resources:
+              limits:
+                cpu: 2
+                memory: 2Gi
+              requests:
+                cpu: 1
+                memory: 1Gi
+
+          ## Désactiver le contrôleur en mode Zookeeper
+          controller:
+            replicaCount: 0
+
+          ## Configuration du mode Kraft - désactivé
+          kraft:
+            enabled: false
+
+          ## Désactiver le Zookeeper intégré
+          zookeeper:
+            enabled: false
+
+          ## Pointer vers votre Zookeeper externe
+          externalZookeeper:
+            servers: "zookeeper-0.zookeeper-headless.kafka.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.kafka.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.kafka.svc.cluster.local:2181"
+
+          ## Configuration additionnelle de Kafka avec extraConfigYaml
+          extraConfigYaml:
+            auto.create.topics.enable: "false"
+            default.replication.factor: 3
+            min.insync.replicas: 2
+            log.retention.hours: 168
+          listeners:
+            overrideListeners: "CLIENT://0.0.0.0:9092,INTERNAL://0.0.0.0:9094,EXTERNAL://0.0.0.0:9096"
+            securityProtocolMap: "CLIENT:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+            advertisedListeners: "EXTERNAL://kafka-external:9096,CLIENT://advertised-address-placeholder:9092,INTERNAL://advertised-address-placeholder:9094"
+        mode: '0644'
+
+    - name: Vérifier si Zookeeper est déjà installé
+      shell: helm list -n {{ kafka_namespace }} | grep zookeeper
+      register: zookeeper_exists
+      changed_when: false
+      failed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Installation de Zookeeper via Helm
+      command: helm install zookeeper bitnami/zookeeper -f /home/vagrant/values-zookeeper.yaml -n {{ kafka_namespace }} --create-namespace
+      register: zookeeper_install
+      failed_when: zookeeper_install.rc != 0 and "already exists" not in zookeeper_install.stderr
+      changed_when: zookeeper_install.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      when: zookeeper_exists.rc != 0
+
+    - name: Attente que les pods Zookeeper soient prêts
+      include_role:
+        name: wait-k8s-pods
+      vars:
+        wait_namespace: "{{ kafka_namespace }}  -l app.kubernetes.io/instance=zookeeper "
+        wait_iterations: 5
+        wait_pause: 5
+        wait_timeout: "180s"
+
+
+
+    - name: Vérification des PVCs Zookeeper
+      command: kubectl get pvc -n {{ kafka_namespace }} -l app.kubernetes.io/instance=zookeeper
+      register: zookeeper_pvc
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Test du DNS de Zookeeper avec un pod temporaire
+      shell: |
+        kubectl run -it --rm test-dns --image=busybox -n {{ kafka_namespace }} -- nslookup zookeeper-0.zookeeper-headless.{{ kafka_namespace }}.svc.cluster.local
+      register: zookeeper_dns_test
+      failed_when: false
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Vérifier si Kafka est déjà installé
+      shell: kubectl get statefulset -n {{ kafka_namespace }} kafka-broker 2>/dev/null || echo "Not found"
+      register: kafka_ss_exists
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Créer un service kafka external
+      shell: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: kafka-external
+          namespace: kafka
+          labels:
+            app.kubernetes.io/component: kafka
+            app.kubernetes.io/instance: kafka
+            app.kubernetes.io/name: kafka
+        spec:
+          type: LoadBalancer
+          ports:
+          - port: 9092
+            targetPort: 9096
+            protocol: TCP
+          selector:
+            app.kubernetes.io/instance: kafka
+            app.kubernetes.io/name: kafka
+            app.kubernetes.io/part-of: kafka
+        EOF
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Installation de Kafka via Helm
+      command: helm install kafka bitnami/kafka -f /home/vagrant/values-kafka.yaml -n {{ kafka_namespace }}
+      register: kafka_install
+      failed_when: kafka_install.rc != 0 and "already exists" not in kafka_install.stderr
+      changed_when: kafka_install.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      when: kafka_ss_exists.stdout == "Not found"
+
+    - name: Attente que les pods Kafka soient prêts
+      include_role:
+        name: wait-k8s-pods
+      vars:
+        wait_namespace: "{{ kafka_namespace }}  -l app.kubernetes.io/instance=kafka "
+        wait_iterations: 10
+        wait_pause: 5
+        wait_timeout: "180s"
+
+    - name: Vérification des statefulsets
+      command: kubectl get statefulsets -n {{ kafka_namespace }}
+      register: kafka_statefulsets
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Vérification des PVCs Kafka
+      command: kubectl get pvc -n {{ kafka_namespace }} -l app.kubernetes.io/instance=kafka
+      register: kafka_pvc
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+    - name: Création d'un pod pour tester Kafka
+      shell: |
+        kubectl run kafka-test --image=bitnami/kafka:latest --rm -it --restart=Never -n {{ kafka_namespace }} -- bash -c "echo 'Connexion à Kafka réussie' && exit"
+      register: kafka_test
+      failed_when: false
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config

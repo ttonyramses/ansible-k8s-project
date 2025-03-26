@@ -1,0 +1,11 @@
+---
+# Variables spécifiques pour les masters Kubernetes
+
+# Configuration spécifique des masters
+kubernetes_master_apiserver_advertise_address: "{{ ansible_host }}"
+kubernetes_master_pod_subnet: "{{ pod_network_cidr }}"
+kubernetes_master_service_subnet: "{{ service_network_cidr }}"
+
+# Configuration des ressources
+kubernetes_master_memory_limit: "4096Mi"
+kubernetes_master_cpu_limit: "2"

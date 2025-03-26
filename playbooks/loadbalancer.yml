@@ -1,0 +1,94 @@
+---
+- name: Installation de MetalLB
+  hosts: primary_master
+  become: false
+  tasks:
+    - name: Déploiement de MetalLB
+      command: kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml
+      register: metallb_result
+      changed_when: metallb_result.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Attente que les pods de metallb soient prêts
+      shell: >
+        kubectl get pods --namespace metallb-system  --no-headers | 
+        grep -v "Completed" | 
+        grep "Running" | 
+        wc -l
+      register: metallb_pods_running
+      until: metallb_pods_running.stdout | int >= 6  # Attendre que tous les pods soient prêts
+      retries: 30
+      delay: 10
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+
+    - name: Création du fichier de configuration MetalLB
+      copy:
+        dest: /home/vagrant/metallb-config.yaml
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: metallb-ip-pool
+            namespace: metallb-system
+          spec:
+            addresses:
+              - {{ metallb_ip_range }}
+          ---
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: metallb-l2-advertisement
+            namespace: metallb-system
+        mode: '0644'
+
+    - name: Application de la configuration MetalLB
+      command: kubectl apply -f /home/vagrant/metallb-config.yaml
+      register: metallb_config_result
+      failed_when: false  # Ne jamais considérer cette tâche comme échouée
+      changed_when: metallb_config_result.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Attente que MetalLB soit prêt
+      shell: kubectl get pods -n metallb-system
+      register: metallb_pods
+      until: "'Running' in metallb_pods.stdout"
+      retries: 30
+      delay: 10
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Création d'un déploiement NGINX de test
+      command: kubectl create deployment nginx --image=nginx --port=80 --replicas=2
+      register: nginx_result
+      failed_when: nginx_result.rc != 0 and "already exists" not in nginx_result.stderr
+      changed_when: nginx_result.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Exposition du déploiement NGINX
+      command: kubectl expose deployment nginx --type=LoadBalancer --name=nginx-service --port=80 --target-port=80
+      register: nginx_expose_result
+      failed_when: nginx_expose_result.rc != 0 and "already exists" not in nginx_expose_result.stderr
+      changed_when: nginx_expose_result.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Vérification de l'adresse IP du service
+      command: kubectl get service nginx-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: nginx_ip
+      until: nginx_ip.stdout != ""
+      retries: 20
+      delay: 10
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Affichage de l'adresse IP du service
+      debug:
+        var: nginx_ip.stdout

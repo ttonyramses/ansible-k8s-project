@@ -1,0 +1,58 @@
+---
+- name: Configuration du réseau Calico
+  hosts: primary_master
+  become: false
+  tasks:
+  #   - name: Vérification du CIDR du cluster
+  #     shell: kubectl -n kube-system get cm kube-proxy -o yaml | grep -A2 clusterCIDR
+  #     register: cluster_cidr
+  #     changed_when: false
+  #     environment:
+  #       KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Téléchargement du fichier Calico
+      get_url:
+        url: https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml
+        dest: /home/vagrant/calico.yaml
+        mode: '0644'
+      register: calico_download
+
+    - name: Ajouter la configuration CALICO_IPV4POOL_CIDR
+      lineinfile:
+        path: /home/vagrant/calico.yaml
+        insertbefore: "CALICO_DISABLE_FILE_LOGGING"
+        line: "            - name: CALICO_IPV4POOL_CIDR\n              value: \"{{ pod_network_cidr }}\""
+        state: present
+
+    - name: Déploiement de Calico
+      command: kubectl apply -f /home/vagrant/calico.yaml
+      register: calico_result
+      failed_when: false  # Ne jamais considérer cette tâche comme échouée
+      changed_when: calico_result.rc == 0
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Attente que les pods de Calico soient prêts
+      shell: >
+        kubectl get pods --namespace kube-system -l k8s-app=calico-node --no-headers | 
+        grep -v "Completed" | 
+        grep "Running" | 
+        wc -l
+      register: calico_pods_running
+      until: calico_pods_running.stdout | int >= 4  # Attendre que tous les pods soient prêts
+      retries: 120
+      delay: 10
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+
+    - name: Vérification des pods dans tous les namespaces
+      command: kubectl get pods --all-namespaces
+      register: all_pods
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      
+    - name: Affichage de l'état des pods
+      debug:
+        var: all_pods.stdout_lines

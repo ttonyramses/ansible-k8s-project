@@ -1,0 +1,55 @@
+---
+- name: Installation des composants Kubernetes
+  hosts: all
+  become: true
+  tasks:
+    - name: Création du répertoire keyrings si inexistant
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Ajout de la clé GPG Kubernetes
+      shell: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Ajout du dépôt Kubernetes
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+        state: present
+        filename: kubernetes
+
+    - name: Installation des paquets Kubernetes
+      apt:
+        name: "{{ kubernetes_packages }}"
+        state: present
+        update_cache: yes
+
+    - name: Activation du service kubelet
+      systemd:
+        name: kubelet
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Ajouter l'utilisateur vagrant au groupe root
+      user:
+        name: vagrant
+        groups: root
+        append: yes
+    
+    - name: Configuration de crictl
+      shell: crictl config runtime-endpoint unix:///run/containerd/containerd.sock
+      changed_when: false
+
+    - name: Recharger le daemon systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Configuration de la completion Bash pour kubectl
+      lineinfile:
+        path: /home/vagrant/.bashrc
+        line: "source <(kubectl completion bash)"
+        state: present
+        create: yes

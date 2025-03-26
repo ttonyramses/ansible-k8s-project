@@ -1,0 +1,110 @@
+---
+- name: Attendre que tous les pods dans le namespace soient prêts (3 vérifications)
+  block:
+    - name: Effectuer {{ wait_iterations | default(3) }} vérifications
+      shell: >
+        kubectl wait --for=condition=ready pods --all -n {{ wait_namespace }} --timeout={{ wait_timeout | default('120s') }}
+      register: wait_result
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      loop: "{{ range(1, (wait_iterations | default(3)) + 1) | list }}"
+      loop_control:
+        label: "Vérification {{ item }} sur {{ wait_iterations | default(3) }}"
+        pause: "{{ wait_pause | default(10) }}"
+      
+    - name: Afficher le résultat de la dernière vérification
+      debug:
+        msg: "Résultat final après {{ wait_iterations  | default(3) }}  vérifications: {{ wait_result.results[-1].stdout_lines }}"
+      
+  rescue:
+    - name: Afficher l'état des pods en cas d'échec
+      shell: kubectl get pods -n {{ wait_namespace }}
+      register: pods_status
+      environment:
+        KUBECONFIG: /home/vagrant/.kube/config
+      
+    - name: Afficher les pods problématiques
+      debug:
+        msg: "Certains pods ne sont pas prêts dans le namespace {{ wait_namespace }}: {{ pods_status.stdout_lines }}"
+
+
+# - name: Attendre que tous les pods dans le namespace soient prêts
+#   block:
+#     - name: Attente initiale pour laisser les pods se créer
+#       pause:
+#         seconds: 10
+      
+#     - name: Vérifier l'état des pods
+#       shell: |
+#         # Attendre que tous les pods existants soient prêts
+#         kubectl wait --for=condition=ready pods --all -n {{ wait_namespace }} --timeout=120s
+        
+#         # Vérifier qu'il n'y a pas de pods en état Pending ou en erreur
+#         PENDING_PODS=$(kubectl get pods -n {{ wait_namespace }} -o jsonpath='{.items[?(@.status.phase=="Pending")].metadata.name}')
+#         FAILED_PODS=$(kubectl get pods -n {{ wait_namespace }} -o jsonpath='{.items[?(@.status.phase=="Failed")].metadata.name}')
+#         UNKNOWN_PODS=$(kubectl get pods -n {{ wait_namespace }} -o jsonpath='{.items[?(@.status.phase=="Unknown")].metadata.name}')
+#         ERROR_PODS=$(kubectl get pods -n {{ wait_namespace }} | grep -v Running | grep -v Completed | grep -v NAME)
+        
+#         if [ -n "$PENDING_PODS" ] || [ -n "$FAILED_PODS" ] || [ -n "$UNKNOWN_PODS" ] || [ -n "$ERROR_PODS" ]; then
+#           echo "Certains pods ne sont pas prêts:"
+#           kubectl get pods -n {{ wait_namespace }}
+#           exit 1
+#         fi
+        
+#         # Vérifier que tous les déploiements sont prêts
+#         DEPLOYS=$(kubectl get deploy -n {{ wait_namespace }} -o name 2>/dev/null || echo "")
+#         if [ -n "$DEPLOYS" ]; then
+#           for deploy in $DEPLOYS; do
+#             READY=$(kubectl get $deploy -n {{ wait_namespace }} -o jsonpath='{.status.readyReplicas}')
+#             REPLICAS=$(kubectl get $deploy -n {{ wait_namespace }} -o jsonpath='{.status.replicas}')
+#             if [ "$READY" != "$REPLICAS" ]; then
+#               echo "Le déploiement $deploy n'est pas prêt: $READY/$REPLICAS pods prêts"
+#               kubectl get $deploy -n {{ wait_namespace }} -o yaml
+#               exit 1
+#             fi
+#           done
+#         fi
+        
+#         echo "Tous les pods et déploiements sont prêts dans le namespace {{ wait_namespace }}."
+#       register: wait_result
+#       retries: "{{ wait_retries | default(6) }}"
+#       delay: "{{ wait_delay | default(20) }}"
+#       until: wait_result.rc == 0
+#       environment:
+#         KUBECONFIG: /home/vagrant/.kube/config
+        
+#     - name: Afficher les informations de succès
+#       debug:
+#         msg: "{{ wait_result.stdout_lines }}"
+        
+#   rescue:
+#     - name: Afficher l'état des pods
+#       shell: kubectl get pods -n {{ wait_namespace }}
+#       register: pods_status
+#       environment:
+#         KUBECONFIG: /home/vagrant/.kube/config
+        
+#     - name: Vérifier les déploiements
+#       shell: kubectl get deploy -n {{ wait_namespace }}
+#       register: deploy_status
+#       failed_when: false
+#       environment:
+#         KUBECONFIG: /home/vagrant/.kube/config
+        
+#     - name: Afficher les détails des pods problématiques
+#       shell: |
+#         kubectl describe pods -n {{ wait_namespace }} -l 'status.phase!=Running,status.phase!=Succeeded'
+#       register: problem_pods_details
+#       failed_when: false
+#       environment:
+#         KUBECONFIG: /home/vagrant/.kube/config
+      
+#     - name: Afficher les pods qui ne sont pas prêts
+#       debug:
+#         msg: 
+#           - "État des pods dans le namespace {{ wait_namespace }}:"
+#           - "{{ pods_status.stdout_lines }}"
+#           - "État des déploiements:"
+#           - "{{ deploy_status.stdout_lines }}"
+#           - "Détails des pods problématiques:"
+#           - "{{ problem_pods_details.stdout_lines }}"
