@@ -2,14 +2,15 @@ Vagrant.configure("2") do |config|
   nodes = [
     { name: "master1", ip: "192.168.56.11", ram: 4096, cpu: 2, disk: 10 },
     { name: "master2", ip: "192.168.56.12", ram: 4096, cpu: 2, disk: 10 },
-    { name: "node1", ip: "192.168.56.13", ram: 3072, cpu: 2, disk: 10, disk2: 50 },
-    { name: "node2", ip: "192.168.56.14", ram: 3072, cpu: 2, disk: 10, disk2: 50 },
-    { name: "node3", ip: "192.168.56.15", ram: 3072, cpu: 2, disk: 10, disk2: 50 }
+    { name: "node1", ip: "192.168.56.13", ram: 6144, cpu: 2, disk: 10, disk2: 50 },
+    { name: "node2", ip: "192.168.56.14", ram: 6144, cpu: 2, disk: 10, disk2: 50 },
+    { name: "node3", ip: "192.168.56.15", ram: 6144, cpu: 2, disk: 10, disk2: 50 }
   ]
 
   nodes.each do |node|
     config.vm.define node[:name] do |machine|
-      machine.vm.box = "ubuntu/jammy64"
+      machine.vm.box = "bento/ubuntu-26.04"
+      machine.vm.box_version = "202606.01.0"
       machine.vm.boot_timeout = 400
       machine.vm.hostname = node[:name]
       machine.vm.network "private_network", ip: node[:ip]
@@ -30,9 +31,15 @@ Vagrant.configure("2") do |config|
           unless File.exist?(disk2_path)
             vb.customize ["createhd", "--filename", disk2_path, "--variant", "Standard", "--size", node[:disk2] * 1024]
           end
-          
-          # Attacher le disque secondaire
-          vb.customize ["storageattach", :id, "--storagectl", "SCSI", "--port", "2", "--device", "0", "--type", "hdd", "--medium", disk2_path]
+
+          # Attacher le disque secondaire sur le contrôleur "VirtIO Controller" déjà
+          # présent par défaut sur les box bento (port 1, le port 0 étant occupé par
+          # le disque de boot). On évite volontairement de créer un second contrôleur
+          # de stockage : VirtualBox 7.2.16 plante (SIGSEGV dans CFGMR3Init) lors de la
+          # création d'un second contrôleur virtio-scsi sur le chipset ARM64 natif
+          # (hôtes Apple Silicon). Sur un hôte x86_64, adapter le nom du contrôleur
+          # si besoin (ex. "SATA Controller") via `VBoxManage showvminfo <vm>`.
+          vb.customize ["storageattach", :id, "--storagectl", "VirtIO Controller", "--port", "1", "--device", "0", "--type", "hdd", "--medium", disk2_path]
         end
       end
 

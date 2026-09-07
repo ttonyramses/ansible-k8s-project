@@ -6,7 +6,7 @@
         kubectl wait --for=condition=ready pods --all -n {{ wait_namespace }} --timeout={{ wait_timeout | default('120s') }}
       register: wait_result
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
       loop: "{{ range(1, (wait_iterations | default(3)) + 1) | list }}"
       loop_control:
         label: "Vérification {{ item }} sur {{ wait_iterations | default(3) }}"
@@ -21,7 +21,7 @@
       shell: kubectl get pods -n {{ wait_namespace }}
       register: pods_status
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
       
     - name: Afficher les pods problématiques
       debug:
@@ -71,7 +71,7 @@
 #       delay: "{{ wait_delay | default(20) }}"
 #       until: wait_result.rc == 0
 #       environment:
-#         KUBECONFIG: /home/vagrant/.kube/config
+#         KUBECONFIG: {{ ansible_facts['user_dir'] }}/.kube/config
         
 #     - name: Afficher les informations de succès
 #       debug:
@@ -82,14 +82,14 @@
 #       shell: kubectl get pods -n {{ wait_namespace }}
 #       register: pods_status
 #       environment:
-#         KUBECONFIG: /home/vagrant/.kube/config
+#         KUBECONFIG: {{ ansible_facts['user_dir'] }}/.kube/config
         
 #     - name: Vérifier les déploiements
 #       shell: kubectl get deploy -n {{ wait_namespace }}
 #       register: deploy_status
 #       failed_when: false
 #       environment:
-#         KUBECONFIG: /home/vagrant/.kube/config
+#         KUBECONFIG: {{ ansible_facts['user_dir'] }}/.kube/config
         
 #     - name: Afficher les détails des pods problématiques
 #       shell: |
@@ -97,7 +97,7 @@
 #       register: problem_pods_details
 #       failed_when: false
 #       environment:
-#         KUBECONFIG: /home/vagrant/.kube/config
+#         KUBECONFIG: {{ ansible_facts['user_dir'] }}/.kube/config
       
 #     - name: Afficher les pods qui ne sont pas prêts
 #       debug:

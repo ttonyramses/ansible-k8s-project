@@ -5,5 +5,6 @@
 kubernetes_worker_memory_limit: "3072Mi"
 kubernetes_worker_cpu_limit: "2"
 
-# Configuration pour OpenEBS sur les workers
-openebs_disk_path: "/dev/sdc"
+# Configuration pour Longhorn sur les workers
+longhorn_disk_path: "/dev/sdb"
+longhorn_data_path: "/var/lib/longhorn"

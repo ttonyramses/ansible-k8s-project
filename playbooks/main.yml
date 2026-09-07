@@ -30,11 +30,11 @@
 - name: Installation du load balancer
   import_playbook: loadbalancer.yml
 
-- name: Installation d'OpenEBS
-  import_playbook: openebs.yml
+- name: Installation de Longhorn
+  import_playbook: longhorn.yml
 
-- name: Installation de Kafka et Zookeeper
-  import_playbook: kafka.yml
+#- name: Installation de Kafka et Zookeeper
+#  import_playbook: kafka.yml
 
 - name: Tests de validation
   import_playbook: test.yml

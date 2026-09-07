@@ -5,23 +5,23 @@
   tasks:
     - name: Téléchargement du fichier components.yaml
       get_url:
-        url: https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-        dest: /home/vagrant/components.yaml
+        url: https://github.com/kubernetes-sigs/metrics-server/releases/download/{{ metrics_server_version }}/components.yaml
+        dest: "{{ ansible_facts['user_dir'] }}/components.yaml"
         mode: '0644'
 
     - name: Ajout du paramètre kubelet-insecure-tls
       replace:
-        path: /home/vagrant/components.yaml
+        path: "{{ ansible_facts['user_dir'] }}/components.yaml"
         regexp: '(\s+)- args:'
         replace: '\1- args:\n\1  - --kubelet-insecure-tls'
 
     - name: Déploiement du metrics-server
-      command: kubectl apply -f /home/vagrant/components.yaml
+      command: kubectl apply -f {{ ansible_facts['user_dir'] }}/components.yaml
       register: metrics_result
       failed_when: false  # Ne jamais considérer cette tâche comme échouée
       changed_when: metrics_result.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Attente que le metrics-server soit prêt
       shell: kubectl get deployment metrics-server -n kube-system
@@ -31,4 +31,4 @@
       delay: 15
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"

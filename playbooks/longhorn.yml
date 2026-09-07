@@ -1,0 +1,79 @@
+---
+- name: Installation de Longhorn
+  hosts: primary_master
+  become: false
+  tasks:
+    - name: Vérifier si Helm est déjà installé
+      command: which helm
+      register: helm_which
+      failed_when: false
+      changed_when: false
+      check_mode: no
+
+    - name: Installation de Helm
+      shell: curl -fsSL https://raw.githubusercontent.com/helm/helm/{{ helm_version }}/scripts/get-helm-3 | bash -s -- --version {{ helm_version }}
+      args:
+        creates: /usr/local/bin/helm
+      become: true
+      register: helm_install
+      changed_when: helm_install.rc == 0
+      when: helm_which.rc != 0
+
+    - name: Vérifier si Longhorn est déjà installé
+      shell: helm list -n {{ longhorn_namespace }} | grep longhorn
+      register: longhorn_installed
+      failed_when: false
+      changed_when: false
+      environment:
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
+
+    - name: Ajout du dépôt Helm Longhorn
+      command: helm repo add longhorn https://charts.longhorn.io
+      register: helm_repo_add
+      changed_when: helm_repo_add.rc == 0
+      environment:
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
+      when: longhorn_installed.rc != 0
+
+    - name: Mise à jour des dépôts Helm
+      command: helm repo update
+      register: helm_repo_update
+      changed_when: helm_repo_update.rc == 0
+      environment:
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
+      when: longhorn_installed.rc != 0
+
+    - name: Installation de Longhorn via Helm
+      command: >
+        helm install longhorn longhorn/longhorn
+        --namespace {{ longhorn_namespace }} --create-namespace
+        --version {{ longhorn_chart_version }}
+        --set defaultSettings.defaultDataPath="{{ hostvars['node1']['longhorn_data_path'] }}"
+        --set persistence.defaultClassReplicaCount={{ storage_replication_factor }}
+        --set defaultSettings.defaultReplicaCount={{ storage_replication_factor }}
+      register: longhorn_install
+      failed_when: longhorn_install.rc != 0 and "already exists" not in longhorn_install.stderr
+      changed_when: longhorn_install.rc == 0
+      environment:
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
+      when: longhorn_installed.rc != 0
+
+    - name: Attendre les pods Longhorn après installation
+      include_role:
+        name: wait-k8s-pods
+      vars:
+        wait_namespace: "{{ longhorn_namespace }}"
+        wait_iterations: 10
+        wait_pause: 10
+        wait_timeout: "180s"
+
+    - name: Vérification des nœuds de stockage Longhorn
+      command: kubectl get nodes.longhorn.io -n {{ longhorn_namespace }}
+      register: longhorn_nodes
+      changed_when: false
+      environment:
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
+
+    - name: Affichage des nœuds de stockage Longhorn
+      debug:
+        var: longhorn_nodes.stdout_lines

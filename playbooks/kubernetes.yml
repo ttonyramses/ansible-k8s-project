@@ -3,28 +3,44 @@
   hosts: all
   become: true
   tasks:
-    - name: Création du répertoire keyrings si inexistant
+    - name: Suppression de l'ancienne définition du dépôt Kubernetes (legacy apt_repository)
       file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: '0755'
-
-    - name: Ajout de la clé GPG Kubernetes
-      shell: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-      args:
-        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     - name: Ajout du dépôt Kubernetes
-      apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+      deb822_repository:
+        name: kubernetes
+        types: deb
+        uris: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor_version }}/deb/"
+        suites: /
+        signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor_version }}/deb/Release.key"
         state: present
-        filename: kubernetes
 
     - name: Installation des paquets Kubernetes
       apt:
-        name: "{{ kubernetes_packages }}"
+        name: "{{ kubernetes_packages | map('regex_replace', '$', '=' + kubernetes_version + '-*') | list }}"
         state: present
         update_cache: yes
+
+    - name: Empêcher la mise à jour automatique des paquets Kubernetes
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: "{{ kubernetes_packages }}"
+
+    - name: Installation de cri-tools (crictl)
+      apt:
+        name: cri-tools
+        state: present
+
+    - name: Empêcher la mise à jour automatique de cri-tools
+      dpkg_selections:
+        name: cri-tools
+        selection: hold
 
     - name: Activation du service kubelet
       systemd:
@@ -49,7 +65,7 @@
 
     - name: Configuration de la completion Bash pour kubectl
       lineinfile:
-        path: /home/vagrant/.bashrc
+        path: "{{ ansible_facts['user_dir'] }}/.bashrc"
         line: "source <(kubectl completion bash)"
         state: present
         create: yes

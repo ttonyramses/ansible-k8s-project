@@ -11,6 +11,14 @@
         - /var/lib/apt/lists/
         - /var/lib/dpkg/
 
+    - name: Suppression de l'ancienne définition du dépôt Docker (legacy apt_repository)
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/docker.list
+        - /etc/apt/keyrings/docker.gpg
+
     - name: Mise à jour des paquets
       apt:
         update_cache: yes
@@ -26,6 +34,7 @@
           - apt-transport-https
           - ca-certificates
           - bash-completion
+          - python3-debian
         state: present
 
     - name: Désactivation du swap
@@ -68,33 +77,32 @@
       command: sysctl --system
       changed_when: false
 
-    - name: Ajout de la clé GPG Docker
-      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-      args:
-        creates: /etc/apt/keyrings/docker.gpg
-
-    - name: Création du répertoire keyrings si inexistant
-      file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: '0755'
-
     - name: Obtenir l'architecture du système
       shell: dpkg --print-architecture
       register: dpkg_arch
       changed_when: false
 
     - name: Ajout du dépôt Docker
-      apt_repository:
-        repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+      deb822_repository:
+        name: docker
+        types: deb
+        uris: https://download.docker.com/linux/ubuntu
+        suites: "{{ ansible_facts['distribution_release'] }}"
+        components: stable
+        architectures: "{{ dpkg_arch.stdout }}"
+        signed_by: https://download.docker.com/linux/ubuntu/gpg
         state: present
-        filename: docker
 
     - name: Installation de containerd
       apt:
         name: containerd.io
         state: present
         update_cache: yes
+
+    - name: Empêcher la mise à jour automatique de containerd
+      dpkg_selections:
+        name: containerd.io
+        selection: hold
 
     - name: Création du répertoire containerd
       file:
@@ -140,7 +148,7 @@
       replace:
         path: /etc/containerd/config.toml
         regexp: 'sandbox_image = "registry.k8s.io/pause:3.8"'
-        replace: 'sandbox_image = "registry.k8s.io/pause:3.9"'
+        replace: 'sandbox_image = "registry.k8s.io/pause:3.10"'
     
     - name: Redémarrage et activation de containerd
       systemd:
@@ -174,9 +182,36 @@
         - { ip: "192.168.56.14", name: "node2" }
         - { ip: "192.168.56.15", name: "node3" }
 
-    - name: Autorisations pour le disque supplémentaire (/dev/sdc) sur les nœuds
-      file:
-        path: /dev/sdc
-        mode: '0666'
+    - name: Installation des prérequis Longhorn (open-iscsi, nfs-common)
+      apt:
+        name:
+          - open-iscsi
+          - nfs-common
+        state: present
+
+    - name: Activation du service iscsid
+      systemd:
+        name: iscsid
+        state: started
+        enabled: yes
+
+    - name: Création du système de fichiers sur le disque dédié à Longhorn
+      community.general.filesystem:
+        fstype: ext4
+        dev: "{{ longhorn_disk_path }}"
       when: "'workers' in group_names"
-      ignore_errors: yes
+
+    - name: Création du point de montage Longhorn
+      file:
+        path: "{{ longhorn_data_path }}"
+        state: directory
+        mode: '0755'
+      when: "'workers' in group_names"
+
+    - name: Montage du disque dédié à Longhorn
+      ansible.posix.mount:
+        path: "{{ longhorn_data_path }}"
+        src: "{{ longhorn_disk_path }}"
+        fstype: ext4
+        state: mounted
+      when: "'workers' in group_names"

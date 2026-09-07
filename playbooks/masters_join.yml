@@ -4,7 +4,7 @@
   become: true
   tasks:
     - name: Jointure du cluster en tant que master
-      command: "{{ hostvars['localhost']['k8s_join_command'] }} --control-plane --certificate-key {{ hostvars['localhost']['k8s_cert_key'] }}"
+      command: "{{ hostvars['localhost']['k8s_join_command'] }} --control-plane --certificate-key {{ hostvars['localhost']['k8s_cert_key'] }} --apiserver-advertise-address={{ ansible_host }}"
       register: join_result
       failed_when: join_result.rc != 0 and "already exists" not in join_result.stderr
       changed_when: join_result.rc == 0
@@ -14,7 +14,7 @@
 
     - name: Création du répertoire .kube pour l'utilisateur
       file:
-        path: /home/vagrant/.kube
+        path: "{{ ansible_facts['user_dir'] }}/.kube"
         state: directory
         owner: vagrant
         group: vagrant
@@ -23,15 +23,8 @@
     - name: Copie du fichier de configuration admin.conf
       copy:
         src: /etc/kubernetes/admin.conf
-        dest: /home/vagrant/.kube/config
+        dest: "{{ ansible_facts['user_dir'] }}/.kube/config"
         owner: vagrant
         group: vagrant
         remote_src: yes
         mode: '0644'
-
-    # - name: Correction de la configuration etcd si nécessaire
-    #   replace:
-    #     path: /etc/kubernetes/manifests/etcd.yaml
-    #     regexp: '10.0.2.15'
-    #     replace: '192.168.56.12'
-    #   ignore_errors: yes

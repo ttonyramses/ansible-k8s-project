@@ -1,6 +1,7 @@
 ---
 # Version de Kubernetes
-kubernetes_version: "1.30.10"
+kubernetes_version: "1.37.0"
+kubernetes_minor_version: "1.37"
 kubernetes_packages:
   - kubelet
   - kubeadm
@@ -9,19 +10,27 @@ kubernetes_packages:
 # Configuration réseau
 pod_network_cidr: "10.244.0.0/16"
 service_network_cidr: "10.96.0.0/12"
+calico_version: "v3.32.2"
+
+# Configuration metrics-server
+metrics_server_version: "v0.9.0"
 
 # Configuration metallb
-metallb_version: "v0.14.9"
+metallb_version: "v0.16.1"
 metallb_ip_range: "192.168.56.200-192.168.56.220"
 
-# Configuration OpenEBS
-openebs_namespace: "openebs"
-openebs_chart_version: "3.9.0"
-cstor_replication_factor: 3
+# Configuration Helm
+helm_version: "v3.19.5"
+
+# Configuration Longhorn (stockage distribué répliqué)
+longhorn_namespace: "longhorn-system"
+longhorn_chart_version: "1.12.1"
+storage_replication_factor: 3
 
 # Configuration Kafka
 kafka_namespace: "kafka"
 kafka_chart_version: "31.5.0"
-zookeeper_chart_version: "12.4.0"
+kafka_app_version: "3.9.0"
+zookeeper_chart_version: "13.8.7"
 kafka_storage_size: "20Gi"
 zookeeper_storage_size: "20Gi"

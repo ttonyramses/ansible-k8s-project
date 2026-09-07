@@ -1,6 +1,6 @@
 # Cluster Kubernetes avec Ansible et Vagrant
 
-Ce projet permet de déployer automatiquement un cluster Kubernetes avec 2 masters et 3 workers, ainsi que plusieurs services additionnels comme Kafka, Zookeeper et OpenEBS.
+Ce projet permet de déployer automatiquement un cluster Kubernetes avec 2 masters et 3 workers, ainsi que plusieurs services additionnels comme Kafka, Zookeeper et Longhorn.
 
 ## Prérequis
 
@@ -31,7 +31,7 @@ Ce projet permet de déployer automatiquement un cluster Kubernetes avec 2 maste
 │   ├── network.yml            # Configuration du réseau Calico
 │   ├── metrics.yml            # Installation des metrics
 │   ├── loadbalancer.yml       # Installation de metallb
-│   ├── openebs.yml            # Installation d'OpenEBS
+│   ├── longhorn.yml           # Installation de Longhorn
 │   ├── kafka.yml              # Installation de Kafka et Zookeeper
 │   └── test.yml               # Tests de validation
 └── roles                      # Rôles Ansible (structure minimale)
@@ -58,12 +58,12 @@ Ce projet permet de déployer automatiquement un cluster Kubernetes avec 2 maste
 
 ## Composants installés
 
-- Kubernetes (v1.30.10)
-- Calico (réseau)
-- Metrics Server
-- MetalLB (load balancer)
-- OpenEBS (stockage distribué)
-- Kafka et Zookeeper
+- Kubernetes (v1.37.0)
+- Calico (réseau, v3.32.2)
+- Metrics Server (v0.9.0)
+- MetalLB (load balancer, v0.16.1)
+- Longhorn (stockage distribué répliqué)
+- Kafka et Zookeeper (désactivé par défaut, voir `playbooks/main.yml`)
 
 ## Accès au cluster
 

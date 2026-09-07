@@ -8,29 +8,29 @@
   #     register: cluster_cidr
   #     changed_when: false
   #     environment:
-  #       KUBECONFIG: /home/vagrant/.kube/config
+  #       KUBECONFIG: {{ ansible_facts['user_dir'] }}/.kube/config
 
     - name: Téléchargement du fichier Calico
       get_url:
-        url: https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml
-        dest: /home/vagrant/calico.yaml
+        url: https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml
+        dest: "{{ ansible_facts['user_dir'] }}/calico.yaml"
         mode: '0644'
       register: calico_download
 
     - name: Ajouter la configuration CALICO_IPV4POOL_CIDR
       lineinfile:
-        path: /home/vagrant/calico.yaml
+        path: "{{ ansible_facts['user_dir'] }}/calico.yaml"
         insertbefore: "CALICO_DISABLE_FILE_LOGGING"
         line: "            - name: CALICO_IPV4POOL_CIDR\n              value: \"{{ pod_network_cidr }}\""
         state: present
 
     - name: Déploiement de Calico
-      command: kubectl apply -f /home/vagrant/calico.yaml
+      command: kubectl apply -f {{ ansible_facts['user_dir'] }}/calico.yaml
       register: calico_result
       failed_when: false  # Ne jamais considérer cette tâche comme échouée
       changed_when: calico_result.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Attente que les pods de Calico soient prêts
       shell: >
@@ -44,14 +44,14 @@
       delay: 10
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Vérification des pods dans tous les namespaces
       command: kubectl get pods --all-namespaces
       register: all_pods
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
       
     - name: Affichage de l'état des pods
       debug:

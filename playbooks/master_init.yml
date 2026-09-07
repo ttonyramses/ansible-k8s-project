@@ -5,9 +5,9 @@
   tasks:
     - name: Création du fichier de configuration kubeadm
       copy:
-        dest: /home/vagrant/kubeadm-config.yaml
+        dest: "{{ ansible_facts['user_dir'] }}/kubeadm-config.yaml"
         content: |
-          apiVersion: kubeadm.k8s.io/v1beta3
+          apiVersion: kubeadm.k8s.io/v1beta4
           kind: InitConfiguration
           localAPIEndpoint:
             advertiseAddress: 192.168.56.11  # Adresse IP de master1
@@ -15,7 +15,7 @@
           nodeRegistration:
             name: master1              # Nom d'hôte du premier nœud maître
           ---
-          apiVersion: kubeadm.k8s.io/v1beta3
+          apiVersion: kubeadm.k8s.io/v1beta4
           kind: ClusterConfiguration
           kubernetesVersion: v{{ kubernetes_version }}  # Version de Kubernetes
           controlPlaneEndpoint: "master1:6443"  # Point d'entrée
@@ -31,21 +31,23 @@
           etcd:
             local:
               extraArgs:
-                advertise-client-urls: "https://master1:2379"
-                listen-client-urls: "https://0.0.0.0:2379"
+                - name: advertise-client-urls
+                  value: "https://master1:2379"
+                - name: listen-client-urls
+                  value: "https://0.0.0.0:2379"
         owner: vagrant
         group: vagrant
         mode: '0644'
 
     - name: Initialisation du cluster avec kubeadm
-      command: sudo kubeadm init --config=/home/vagrant/kubeadm-config.yaml --upload-certs
+      command: "sudo kubeadm init --config={{ ansible_facts['user_dir'] }}/kubeadm-config.yaml --upload-certs"
       register: kubeadm_init
       changed_when: "'Your Kubernetes control-plane has initialized successfully' in kubeadm_init.stdout"
       failed_when: kubeadm_init.rc != 0 and "already exists" not in kubeadm_init.stderr
 
     - name: Création du répertoire .kube pour l'utilisateur
       file:
-        path: /home/vagrant/.kube
+        path: "{{ ansible_facts['user_dir'] }}/.kube"
         state: directory
         owner: vagrant
         group: vagrant
@@ -54,7 +56,7 @@
     - name: Copie du fichier de configuration admin.conf
       copy:
         src: /etc/kubernetes/admin.conf
-        dest: /home/vagrant/.kube/config
+        dest: "{{ ansible_facts['user_dir'] }}/.kube/config"
         owner: vagrant
         group: vagrant
         remote_src: yes
@@ -66,10 +68,10 @@
       changed_when: false
       become_user: vagrant
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Extraction de la clé de certificat pour ajout des masters
-      command: kubeadm init phase upload-certs --upload-certs
+      command: "kubeadm init phase upload-certs --upload-certs --config={{ ansible_facts['user_dir'] }}/kubeadm-config.yaml"
       register: cert_key
       changed_when: false
 
@@ -92,7 +94,7 @@
       changed_when: false
       become_user: vagrant
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Vérification des nœuds
       command: kubectl get nodes
@@ -100,4 +102,4 @@
       changed_when: false
       become_user: vagrant
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"

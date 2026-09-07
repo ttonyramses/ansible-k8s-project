@@ -5,7 +5,7 @@
   tasks:
     - name: Création du fichier de configuration Zookeeper
       copy:
-        dest: /home/vagrant/values-zookeeper.yaml
+        dest: "{{ ansible_facts['user_dir'] }}/values-zookeeper.yaml"
         content: |
           # Fichier values-zookeeper.yaml avec configuration de stockage explicite
           replicaCount: 3
@@ -15,7 +15,7 @@
             enabled: true
             ## Persistent Volume Storage Class
             ## If defined, storageClassName: <storageClass>
-            storageClass: "cstor-storage-class"
+            storageClass: "longhorn"
             accessModes:
               - ReadWriteOnce
             size: {{ zookeeper_storage_size }}
@@ -44,7 +44,7 @@
 
     - name: Création du fichier de configuration Kafka
       copy:
-        dest: /home/vagrant/values-kafka.yaml
+        dest: "{{ ansible_facts['user_dir'] }}/values-kafka.yaml"
         content: |
           ## https://github.com/bitnami/charts/blob/main/bitnami/kafka/README.md
           ## Configuration des brokers Kafka
@@ -52,7 +52,7 @@
             replicaCount: 3  # Nombre de répliques de brokers explicitement défini
             persistence:
               enabled: true
-              storageClass: "cstor-storage-class"
+              storageClass: "longhorn"
               accessModes:
                 - ReadWriteOnce
               size: {{ kafka_storage_size }}
@@ -100,15 +100,15 @@
       changed_when: false
       failed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Installation de Zookeeper via Helm
-      command: helm install zookeeper bitnami/zookeeper -f /home/vagrant/values-zookeeper.yaml -n {{ kafka_namespace }} --create-namespace
+      command: helm install zookeeper bitnami/zookeeper -f {{ ansible_facts['user_dir'] }}/values-zookeeper.yaml -n {{ kafka_namespace }} --create-namespace --version {{ zookeeper_chart_version }}
       register: zookeeper_install
       failed_when: zookeeper_install.rc != 0 and "already exists" not in zookeeper_install.stderr
       changed_when: zookeeper_install.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
       when: zookeeper_exists.rc != 0
 
     - name: Attente que les pods Zookeeper soient prêts
@@ -127,7 +127,7 @@
       register: zookeeper_pvc
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Test du DNS de Zookeeper avec un pod temporaire
       shell: |
@@ -136,14 +136,14 @@
       failed_when: false
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Vérifier si Kafka est déjà installé
       shell: kubectl get statefulset -n {{ kafka_namespace }} kafka-broker 2>/dev/null || echo "Not found"
       register: kafka_ss_exists
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Créer un service kafka external
       shell: |
@@ -170,15 +170,15 @@
         EOF
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Installation de Kafka via Helm
-      command: helm install kafka bitnami/kafka -f /home/vagrant/values-kafka.yaml -n {{ kafka_namespace }}
+      command: helm install kafka bitnami/kafka -f {{ ansible_facts['user_dir'] }}/values-kafka.yaml -n {{ kafka_namespace }} --version {{ kafka_chart_version }}
       register: kafka_install
       failed_when: kafka_install.rc != 0 and "already exists" not in kafka_install.stderr
       changed_when: kafka_install.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
       when: kafka_ss_exists.stdout == "Not found"
 
     - name: Attente que les pods Kafka soient prêts
@@ -195,19 +195,19 @@
       register: kafka_statefulsets
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Vérification des PVCs Kafka
       command: kubectl get pvc -n {{ kafka_namespace }} -l app.kubernetes.io/instance=kafka
       register: kafka_pvc
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
     - name: Création d'un pod pour tester Kafka
       shell: |
-        kubectl run kafka-test --image=bitnami/kafka:latest --rm -it --restart=Never -n {{ kafka_namespace }} -- bash -c "echo 'Connexion à Kafka réussie' && exit"
+        kubectl run kafka-test --image=bitnami/kafka:{{ kafka_app_version }} --rm -it --restart=Never -n {{ kafka_namespace }} -- bash -c "echo 'Connexion à Kafka réussie' && exit"
       register: kafka_test
       failed_when: false
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"

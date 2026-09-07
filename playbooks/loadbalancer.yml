@@ -8,7 +8,7 @@
       register: metallb_result
       changed_when: metallb_result.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Attente que les pods de metallb soient prêts
       shell: >
@@ -22,12 +22,12 @@
       delay: 10
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
 
     - name: Création du fichier de configuration MetalLB
       copy:
-        dest: /home/vagrant/metallb-config.yaml
+        dest: "{{ ansible_facts['user_dir'] }}/metallb-config.yaml"
         content: |
           apiVersion: metallb.io/v1beta1
           kind: IPAddressPool
@@ -46,12 +46,12 @@
         mode: '0644'
 
     - name: Application de la configuration MetalLB
-      command: kubectl apply -f /home/vagrant/metallb-config.yaml
+      command: kubectl apply -f {{ ansible_facts['user_dir'] }}/metallb-config.yaml
       register: metallb_config_result
       failed_when: false  # Ne jamais considérer cette tâche comme échouée
       changed_when: metallb_config_result.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Attente que MetalLB soit prêt
       shell: kubectl get pods -n metallb-system
@@ -61,7 +61,7 @@
       delay: 10
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Création d'un déploiement NGINX de test
       command: kubectl create deployment nginx --image=nginx --port=80 --replicas=2
@@ -69,7 +69,7 @@
       failed_when: nginx_result.rc != 0 and "already exists" not in nginx_result.stderr
       changed_when: nginx_result.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Exposition du déploiement NGINX
       command: kubectl expose deployment nginx --type=LoadBalancer --name=nginx-service --port=80 --target-port=80
@@ -77,7 +77,7 @@
       failed_when: nginx_expose_result.rc != 0 and "already exists" not in nginx_expose_result.stderr
       changed_when: nginx_expose_result.rc == 0
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Vérification de l'adresse IP du service
       command: kubectl get service nginx-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
@@ -87,7 +87,7 @@
       delay: 10
       changed_when: false
       environment:
-        KUBECONFIG: /home/vagrant/.kube/config
+        KUBECONFIG: "{{ ansible_facts['user_dir'] }}/.kube/config"
 
     - name: Affichage de l'adresse IP du service
       debug:
