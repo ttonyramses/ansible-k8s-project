@@ -178,6 +178,7 @@
       with_items:
         - { ip: "192.168.56.11", name: "master1" }
         - { ip: "192.168.56.12", name: "master2" }
+        - { ip: "192.168.56.16", name: "master3" }
         - { ip: "192.168.56.13", name: "node1" }
         - { ip: "192.168.56.14", name: "node2" }
         - { ip: "192.168.56.15", name: "node3" }

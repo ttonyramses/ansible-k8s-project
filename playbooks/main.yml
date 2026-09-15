@@ -12,11 +12,17 @@
 - name: Installation de Kubernetes
   import_playbook: kubernetes.yml
 
+- name: Configuration de la haute disponibilité du plan de contrôle (VIP keepalived)
+  import_playbook: keepalived.yml
+
 - name: Initialisation du master principal
   import_playbook: master_init.yml
 
 - name: Ajout des masters additionnels
   import_playbook: masters_join.yml
+
+- name: Configuration des sauvegardes etcd
+  import_playbook: etcd_backup.yml
 
 - name: Ajout des workers
   import_playbook: workers_join.yml

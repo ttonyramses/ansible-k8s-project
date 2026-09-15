@@ -10,31 +10,32 @@
           apiVersion: kubeadm.k8s.io/v1beta4
           kind: InitConfiguration
           localAPIEndpoint:
-            advertiseAddress: 192.168.56.11  # Adresse IP de master1
+            advertiseAddress: {{ ansible_host }}  # Adresse IP propre du nœud (jamais le VIP)
             bindPort: 6443                  # Port standard
           nodeRegistration:
-            name: master1              # Nom d'hôte du premier nœud maître
+            name: {{ inventory_hostname }}
           ---
           apiVersion: kubeadm.k8s.io/v1beta4
           kind: ClusterConfiguration
           kubernetesVersion: v{{ kubernetes_version }}  # Version de Kubernetes
-          controlPlaneEndpoint: "master1:6443"  # Point d'entrée
+          controlPlaneEndpoint: "{{ apiserver_vip }}:6443"  # VIP keepalived
           apiServer:
             certSANs:
               - "master1"
               - "master2"
+              - "master3"
               - "192.168.56.11"
               - "192.168.56.12"
+              - "192.168.56.16"
+              - "{{ apiserver_vip }}"
           networking:
             podSubnet: "{{ pod_network_cidr }}"   # Plage d'adresses IP pour les pods
             serviceSubnet: "{{ service_network_cidr }}" # Plage d'adresses IP pour les services
-          etcd:
-            local:
-              extraArgs:
-                - name: advertise-client-urls
-                  value: "https://master1:2379"
-                - name: listen-client-urls
-                  value: "https://0.0.0.0:2379"
+          # Pas d'etcd.local.extraArgs ici : un override statique serait stocké tel quel
+          # dans la ClusterConfiguration partagée du cluster et réappliqué à l'identique
+          # à chaque master qui rejoint (masters_join.yml), cassant l'étiquetage etcd
+          # par-nœud. On laisse kubeadm calculer advertise-client-urls et
+          # --etcd-servers=https://127.0.0.1:2379 automatiquement pour chaque nœud.
         owner: vagrant
         group: vagrant
         mode: '0644'

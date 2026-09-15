@@ -1,0 +1,122 @@
+---
+- name: Installation d'etcdctl/etcdutl et configuration des sauvegardes etcd
+  hosts: masters
+  become: true
+  tasks:
+    - name: Détermination de l'architecture etcd (amd64/arm64)
+      set_fact:
+        etcd_arch: "{{ 'arm64' if ansible_facts['architecture'] == 'aarch64' else 'amd64' }}"
+
+    - name: Vérifier si etcdctl est déjà installé à la bonne version
+      command: /usr/local/bin/etcdctl version
+      register: etcdctl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Téléchargement de l'archive etcd {{ etcd_version }}
+      get_url:
+        url: "https://github.com/etcd-io/etcd/releases/download/{{ etcd_version }}/etcd-{{ etcd_version }}-linux-{{ etcd_arch }}.tar.gz"
+        dest: "/tmp/etcd-{{ etcd_version }}-linux-{{ etcd_arch }}.tar.gz"
+        mode: '0644'
+      when: etcd_version not in etcdctl_check.stdout | default('')
+
+    - name: Extraction de l'archive etcd
+      unarchive:
+        src: "/tmp/etcd-{{ etcd_version }}-linux-{{ etcd_arch }}.tar.gz"
+        dest: /tmp
+        remote_src: yes
+      when: etcd_version not in etcdctl_check.stdout | default('')
+
+    - name: Installation des binaires etcdctl et etcdutl
+      copy:
+        src: "/tmp/etcd-{{ etcd_version }}-linux-{{ etcd_arch }}/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        mode: '0755'
+        remote_src: yes
+      loop:
+        - etcdctl
+        - etcdutl
+      when: etcd_version not in etcdctl_check.stdout | default('')
+
+    - name: Création du répertoire de sauvegarde sur le partage /vagrant
+      file:
+        path: "/vagrant/etcd-backups/{{ inventory_hostname }}"
+        state: directory
+        mode: '0755'
+
+    - name: Déploiement du script de snapshot etcd
+      copy:
+        dest: /usr/local/sbin/etcd-snapshot.sh
+        mode: '0700'
+        owner: root
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+
+          TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+          HOST_SHORT="{{ inventory_hostname }}"
+          TMP_DIR="/root/etcd-backup-tmp"
+          DEST_DIR="/vagrant/etcd-backups/${HOST_SHORT}"
+          SNAPSHOT_NAME="etcd-snapshot-${TIMESTAMP}.db"
+
+          mkdir -p "${TMP_DIR}" "${DEST_DIR}"
+
+          ETCDCTL_API=3 /usr/local/bin/etcdctl snapshot save "${TMP_DIR}/${SNAPSHOT_NAME}" \
+            --endpoints=https://127.0.0.1:2379 \
+            --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+            --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+            --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+
+          # Vérification d'intégrité avant publication sur le partage /vagrant
+          /usr/local/bin/etcdutl snapshot status "${TMP_DIR}/${SNAPSHOT_NAME}" --write-out=json
+
+          mv "${TMP_DIR}/${SNAPSHOT_NAME}" "${DEST_DIR}/${SNAPSHOT_NAME}"
+
+          # Rétention : ne garder que les {{ etcd_backup_retention_count }} derniers snapshots
+          cd "${DEST_DIR}"
+          ls -1t etcd-snapshot-*.db 2>/dev/null | tail -n +$(( {{ etcd_backup_retention_count }} + 1 )) | xargs -r rm -f
+
+    - name: Déploiement de l'unité systemd du service de snapshot
+      copy:
+        dest: /etc/systemd/system/etcd-snapshot.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Sauvegarde etcd (snapshot)
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/etcd-snapshot.sh
+      register: etcd_snapshot_service
+
+    - name: Déploiement de l'unité systemd du timer de snapshot
+      copy:
+        dest: /etc/systemd/system/etcd-snapshot.timer
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Planification des sauvegardes etcd
+
+          [Timer]
+          OnCalendar={{ etcd_backup_schedule }}
+          Persistent=true
+          RandomizedDelaySec=60
+
+          [Install]
+          WantedBy=timers.target
+      register: etcd_snapshot_timer
+
+    - name: Rechargement systemd si les unités ont changé
+      systemd:
+        daemon_reload: yes
+      when: etcd_snapshot_service.changed or etcd_snapshot_timer.changed
+
+    - name: Activation et démarrage du timer de sauvegarde etcd
+      systemd:
+        name: etcd-snapshot.timer
+        state: started
+        enabled: yes
+
+    - name: Déclenchement d'une sauvegarde initiale (validation immédiate)
+      command: systemctl start etcd-snapshot.service
+      changed_when: true

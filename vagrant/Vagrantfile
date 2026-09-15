@@ -2,6 +2,7 @@ Vagrant.configure("2") do |config|
   nodes = [
     { name: "master1", ip: "192.168.56.11", ram: 4096, cpu: 2, disk: 10 },
     { name: "master2", ip: "192.168.56.12", ram: 4096, cpu: 2, disk: 10 },
+    { name: "master3", ip: "192.168.56.16", ram: 4096, cpu: 2, disk: 10 },
     { name: "node1", ip: "192.168.56.13", ram: 6144, cpu: 2, disk: 10, disk2: 50 },
     { name: "node2", ip: "192.168.56.14", ram: 6144, cpu: 2, disk: 10, disk2: 50 },
     { name: "node3", ip: "192.168.56.15", ram: 6144, cpu: 2, disk: 10, disk2: 50 }

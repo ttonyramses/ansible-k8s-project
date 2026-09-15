@@ -1,0 +1,89 @@
+---
+- name: Configuration de la haute disponibilité du plan de contrôle (VIP keepalived)
+  hosts: masters
+  become: true
+  tasks:
+    - name: Installation de keepalived
+      apt:
+        name: keepalived
+        state: present
+        update_cache: yes
+
+    - name: Détermination de l'interface réseau portant l'IP privée (VRRP)
+      set_fact:
+        vrrp_interface: "{{ ansible_facts
+          | dict2items
+          | selectattr('value.ipv4.address', 'defined')
+          | selectattr('value.ipv4.address', 'equalto', ansible_host)
+          | map(attribute='key') | first }}"
+
+    - name: Création du répertoire des scripts keepalived
+      file:
+        path: /etc/keepalived/scripts
+        state: directory
+        mode: '0755'
+
+    - name: Déploiement du script de vérification de l'apiserver
+      copy:
+        dest: /etc/keepalived/scripts/check_apiserver.sh
+        mode: '0700'
+        owner: root
+        content: |
+          #!/bin/bash
+          curl --silent --max-time 2 --insecure https://localhost:6443/healthz -o /dev/null || exit 1
+
+    - name: Déploiement de la configuration keepalived
+      copy:
+        dest: /etc/keepalived/keepalived.conf
+        mode: '0644'
+        content: |
+          # virtual_router_id choisi arbitrairement (labo), risque de collision uniquement
+          # si une autre instance VRRP existe sur le même réseau L2 (négligeable ici, le
+          # réseau hostonly VirtualBox est privé à cette machine).
+          vrrp_script chk_apiserver {
+              script "/etc/keepalived/scripts/check_apiserver.sh"
+              interval 3
+              weight -20
+              fall 2
+              rise 2
+          }
+
+          vrrp_instance VI_1 {
+              state {{ 'MASTER' if inventory_hostname == groups['masters'][0] else 'BACKUP' }}
+              interface {{ vrrp_interface }}
+              virtual_router_id {{ vrrp_router_id }}
+              priority {{ 150 - (groups['masters'].index(inventory_hostname) * 10) }}
+              advert_int 1
+              authentication {
+                  auth_type PASS
+                  auth_pass {{ vrrp_auth_pass }}
+              }
+              unicast_src_ip {{ ansible_host }}
+              unicast_peer {
+          {% for peer in groups['masters'] if peer != inventory_hostname %}
+                  {{ hostvars[peer].ansible_host }}
+          {% endfor %}
+              }
+              virtual_ipaddress {
+                  {{ apiserver_vip }}
+              }
+              track_script {
+                  chk_apiserver
+              }
+          }
+      register: keepalived_conf
+
+    - name: Activation et redémarrage de keepalived (configuration modifiée)
+      systemd:
+        name: keepalived
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+      when: keepalived_conf.changed
+
+    - name: S'assurer que keepalived est démarré (configuration inchangée)
+      systemd:
+        name: keepalived
+        state: started
+        enabled: yes
+      when: not keepalived_conf.changed

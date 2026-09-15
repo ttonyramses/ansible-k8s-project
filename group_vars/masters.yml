@@ -9,3 +9,13 @@ kubernetes_master_service_subnet: "{{ service_network_cidr }}"
 # Configuration des ressources
 kubernetes_master_memory_limit: "4096Mi"
 kubernetes_master_cpu_limit: "2"
+
+# Haute disponibilité du plan de contrôle (VIP keepalived)
+apiserver_vip: "192.168.56.10"
+vrrp_router_id: 51
+vrrp_auth_pass: "k8s-vip-lab-secret"   # secret VRRP en clair, usage labo uniquement
+
+# Sauvegarde etcd (etcdctl/etcdutl + timer systemd)
+etcd_version: "v3.7.0"                  # doit correspondre à l'image etcd du control plane
+etcd_backup_schedule: "hourly"          # OnCalendar= du timer systemd
+etcd_backup_retention_count: 24         # snapshots conservés par hôte (~1 jour)
