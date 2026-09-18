@@ -1,6 +1,6 @@
 # Cluster Kubernetes avec Ansible et Vagrant
 
-Ce projet permet de déployer automatiquement un cluster Kubernetes avec 2 masters et 3 workers, ainsi que plusieurs services additionnels comme Kafka, Zookeeper et Longhorn.
+Ce projet permet de déployer automatiquement un cluster Kubernetes hautement disponible avec 3 masters et 3 workers, ainsi que plusieurs services additionnels comme Kafka, Zookeeper et Longhorn.
 
 ## Prérequis
 
@@ -25,8 +25,10 @@ Ce projet permet de déployer automatiquement un cluster Kubernetes avec 2 maste
 │   ├── main.yml               # Playbook principal
 │   ├── prerequisites.yml      # Installation des prérequis
 │   ├── kubernetes.yml         # Installation Kubernetes
+│   ├── keepalived.yml         # VIP haute disponibilité du plan de contrôle
 │   ├── master_init.yml        # Initialisation du master principal
 │   ├── masters_join.yml       # Ajout des autres masters
+│   ├── etcd_backup.yml        # Sauvegardes automatiques d'etcd
 │   ├── workers_join.yml       # Ajout des workers
 │   ├── network.yml            # Configuration du réseau Calico
 │   ├── metrics.yml            # Installation des metrics
@@ -64,15 +66,47 @@ Ce projet permet de déployer automatiquement un cluster Kubernetes avec 2 maste
 - MetalLB (load balancer, v0.16.1)
 - Longhorn (stockage distribué répliqué)
 - Kafka et Zookeeper (désactivé par défaut, voir `playbooks/main.yml`)
+- keepalived (VIP haute disponibilité pour le plan de contrôle)
+
+## Haute disponibilité du plan de contrôle
+
+Le cluster utilise 3 masters (`master1`, `master2`, `master3`) avec etcd en topologie stacked : chaque master fait tourner sa propre instance etcd, répliquée entre les 3 nœuds. Avec 3 membres, le cluster etcd tolère la perte d'un nœud sans interruption (contrairement à une topologie à 2 masters, qui ne tolère aucune perte).
+
+Un VIP (adresse IP virtuelle) `192.168.56.10:6443`, géré par **keepalived** (VRRP en unicast) sur les 3 masters, sert de point d'entrée unique pour l'API Kubernetes. En cas de panne du master qui détient le VIP, celui-ci bascule automatiquement (en quelques secondes) vers un autre master sain, selon la priorité :
+
+| Master  | Priorité | Rôle initial |
+|---------|----------|--------------|
+| master1 | 150      | MASTER       |
+| master2 | 140      | BACKUP       |
+| master3 | 130      | BACKUP       |
+
+`controlPlaneEndpoint` et les certificats du cluster (SANs) pointent sur ce VIP, jamais sur l'IP d'un master en particulier.
+
+## Sauvegardes automatiques d'etcd
+
+Chaque master exécute un timer systemd (`etcd-snapshot.timer`, configurable via `etcd_backup_schedule` dans `group_vars/masters.yml`, horaire par défaut) qui prend un snapshot etcd via `etcdctl snapshot save`, vérifie son intégrité avec `etcdutl snapshot status`, puis le publie sur le dossier partagé `/vagrant/etcd-backups/<nom-du-master>/` — c'est-à-dire directement sur le disque de la machine hôte, donc les sauvegardes survivent même si une VM est détruite ou corrompue. La rétention par hôte est configurable via `etcd_backup_retention_count` (24 par défaut, soit ~1 jour d'historique).
+
+Pour lister les sauvegardes disponibles :
+```
+ls vagrant/etcd-backups/master1/ vagrant/etcd-backups/master2/ vagrant/etcd-backups/master3/
+```
+
+Pour restaurer un snapshot en cas de corruption (voir la documentation officielle [etcd disaster recovery](https://etcd.io/docs/latest/op-guide/recovery/) pour la procédure complète) :
+```
+etcdutl snapshot restore <fichier.db> --data-dir /var/lib/etcd-restored ...
+```
 
 ## Accès au cluster
 
-Pour accéder au cluster depuis la machine hôte, copiez le fichier de configuration depuis le master principal :
+Le cluster expose son API via le VIP haute disponibilité, pas via l'IP d'un master en particulier. Pour accéder au cluster depuis la machine hôte, copiez le fichier de configuration depuis n'importe quel master (ex. `master1`) :
 ```
 mkdir -p ~/.kube
-scp -i ~/.vagrant.d/insecure_private_key vagrant@192.168.56.11:/home/vagrant/.kube/config ~/.kube/config
-# Modifiez si nécessaire les IPs dans le fichier de configuration
+scp -i vagrant/.vagrant/machines/master1/virtualbox/private_key vagrant@192.168.56.11:/home/vagrant/.kube/config ~/.kube/config
 ```
+
+Le fichier récupéré pointe déjà vers `https://192.168.56.10:6443` (le VIP) et reste valide même si `master1` tombe, tant qu'au moins un autre master est disponible.
+
+⚠️ Chaque reconstruction complète du cluster (`kubeadm reset` + réinitialisation) génère une **nouvelle autorité de certification** : un ancien `~/.kube/config` doit être régénéré après un rebuild, sous peine d'erreurs `x509: certificate signed by unknown authority`.
 
 # Kafka sur Kubernetes - Guide d'utilisation
 
